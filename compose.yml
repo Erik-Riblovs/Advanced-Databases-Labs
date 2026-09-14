@@ -1,0 +1,79 @@
+name: advanced-databases
+
+services:
+  db:
+    image: mysql:8.4
+    container_name: advanced-databases-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_ROOT_HOST: "%"
+    command:
+      # No binary logging: nothing here needs replication or point-in-time
+      # recovery, and turning it off avoids confusing permission errors when
+      # creating stored functions and triggers.
+      - --skip-log-bin
+      # Comfortably large limits so that importing big .sql dumps just works.
+      - --max-allowed-packet=1G
+      - --innodb-buffer-pool-size=512M
+      - --innodb-flush-log-at-trx-commit=2
+      - --local-infile=1
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_ai_ci
+    ports:
+      - "${DB_PORT:-3306}:3306"
+    volumes:
+      # Named volume: your databases live here and survive `docker compose down`.
+      - db-data:/var/lib/mysql
+      # This project folder, so you can import any .sql file you save here.
+      - ./:/work
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-proot"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+
+  phpmyadmin:
+    image: phpmyadmin:5.2
+    container_name: advanced-databases-phpmyadmin
+    restart: unless-stopped
+    environment:
+      PMA_HOST: db
+      PMA_PORT: 3306
+      # Log straight in as root, with no login page, the way XAMPP did.
+      PMA_USER: root
+      PMA_PASSWORD: root
+      UPLOAD_LIMIT: 4G
+      MEMORY_LIMIT: 2G
+      MAX_EXECUTION_TIME: 0
+    ports:
+      - "${PMA_PORT:-8080}:80"
+    volumes:
+      - ./:/work
+    configs:
+      - source: phpmyadmin-config
+        target: /etc/phpmyadmin/config.user.inc.php
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  db-data:
+
+configs:
+  phpmyadmin-config:
+    content: |
+      <?php
+      // Any .sql or .gz file saved in this project folder can be imported
+      // straight from disk: Import tab -> "Select file to import".
+      $$cfg['UploadDir'] = '/work';
+      // Keep the query box on screen after running a query.
+      $$cfg['RetainQueryBox'] = true;
+      // Don't give up on long imports.
+      $$cfg['ExecTimeLimit'] = 0;
+      // No lab uses phpMyAdmin's optional configuration storage (bookmarks,
+      // the designer), so hide the banner that asks you to set it up.
+      $$cfg['PmaNoRelation_DisableWarning'] = true;
+      $$cfg['ShowSQL'] = true;
+      $$cfg['SendErrorReports'] = 'never';
